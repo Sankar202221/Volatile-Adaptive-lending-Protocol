@@ -1,0 +1,23 @@
+## Solidity / Foundry / Node
+out/
+build/
+node_modules/
+.env
+.cache
+lib/
+.DS_Store
+/.idea
+/.vscode
+/.history
+/.parcel-cache
+/.pytest_cache
+.venv
+remappings.txt
+/*.log
+
+# Editor
+*.swp
+*.swo
+
+# Test artifacts
+coverage/

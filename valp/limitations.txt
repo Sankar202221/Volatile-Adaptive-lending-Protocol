@@ -1,0 +1,88 @@
+# Volatility-Adaptive Lending Protocol (VALP) Limitations
+
+This document outlines the explicit boundaries of the VALP architecture.
+It acts as an objective reference for what the system is securely capable
+of executing and where it falls short by design or by deliberate scope decision.
+
+---
+
+## What It Can Do
+
+- **Single-Asset Markets**: Power isolated lending environments where users
+  supply and borrow the exact same underlying asset (e.g. purely WETH pools).
+- **Endogenous Risk Mitigation**: Automatically restrict LTV and Liquidation
+  Thresholds as real-time market volatility scales, shielding lenders during
+  turbulent events.
+- **Dynamic Circuit Breaking**: Freeze all new borrowing the moment recorded
+  volatility exceeds the extreme threshold (70%).  Oracle failures also trigger
+  the freeze (fail-closed).
+- **Continuous Compounding**: Accrue interest through a 3rd-order Taylor series
+  approximation of e^(rt) — materially more accurate than simple or 2nd-order
+  models at high rates and long accrual intervals.
+- **Fail-Closed Oracle Policy**: When the volatility oracle is unavailable or
+  its data is stale (> 1 hour), the system assumes maximum volatility (WAD).
+  This tightens all safety parameters rather than silently relaxing them.
+- **Two-Step Admin Safeguards**: Ownership transfers for both LendingPool and
+  InterestRateModel require a pending-owner acceptance step, preventing
+  accidental admin key loss.
+- **Timelocked Reserve Factor**: Changes to the protocol fee rate are subject to
+  a mandatory 2-day timelock, giving depositors time to exit before yield is
+  redirected to reserves.
+- **Collateral Top-Up**: Users with existing borrows can always deposit more
+  collateral to improve their health factor — the standard mechanism used in
+  Aave and Compound.
+- **Third-Party Repayment**: Any address can repay debt on behalf of a borrower
+  via `repayOnBehalf()`, enabling keeper-based health management without
+  requiring privileged engine access.
+
+---
+
+## What It Cannot Do (By Design)
+
+- **Multi-Asset / Cross-Collateral Lending**: The `LendingPool` contract
+  supports only one asset token per deployment.  Users cannot deposit WBTC to
+  borrow USDC within the same pool.  Multi-asset support requires an asset
+  registry and per-asset oracle feeds.
+
+- **Price-Based Liquidations**: There is no external price oracle. Liquidations
+  trigger solely when the health factor (based on utilisation and interest
+  accumulation) falls below 1.0, not because Token X crashed on an exchange.
+
+- **Liquidation at 100% Utilisation**: If the pool is 100% utilised there are
+  no idle tokens for a liquidator to receive.  Liquidation is structurally
+  blocked until some repayment occurs.
+
+- **EIP-4626 Compliance**: Pool shares do not conform to the EIP-4626 vault
+  standard, breaking direct composability with aggregators like Yearn.
+
+- **Flash Loans**: No uncollateralised flash-loan endpoints are provided.
+
+---
+
+## Known Remaining Risks (Scope Limitations)
+
+- **Oracle Walk-Manipulation (Issue 6)**: With MIN_UPDATE_INTERVAL = 5 s and
+  WINDOW_SIZE = 12, a whitelisted feeder can fill the ring buffer with biased
+  prices in ~60 seconds.  Mitigation requires either TWAP-weighted averaging
+  inside getVolatility() or a much larger window (e.g. 168 entries at 10-minute
+  intervals).  This is flagged for a v2 redesign.
+
+- **Virtual Share Seed (Issue 15)**: VIRTUAL_SHARES = 1,000 wei provides
+  minimal inflation-attack resistance for 18-decimal tokens.  A production
+  deployment should either seed with real tokens at construction (e.g.
+  1,000e18) or follow EIP-4626's 10^(decimals/2) guidance, accepting a small
+  bootstrapping deposit from the deployer.
+
+- **globalBorrowIndex Overflow**: At MAX_RATE = 200% APR the index doubles
+  every ~6 months.  The 365-day elapsed cap limits per-call growth, but a
+  70-year-old pool at max rate could theoretically approach uint256 saturation.
+  SafeMath or an index cap is advisable for multi-decade deployments.
+
+- **Interest Index Approximation Error**: The 3rd-order Taylor series still
+  underestimates e^(rt) by ~2% at 200% APR / 1-year window.  For maximal
+  accuracy, implement a pre-computed table or Solidity fixed-point exponential.
+
+- **Single-Asset Borrow Economics**: Borrowing the same asset you deposit is
+  only economically meaningful for looping yield — which the circuit breaker
+  partially inhibits.  Multi-asset support or explicit yield-loop documentation
+  is recommended before a production launch.
